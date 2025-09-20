@@ -110,3 +110,30 @@ WEBHOOK_URL=https://<你的-worker-域名> TELEGRAM_SECRET_TOKEN=<你的SECRET> 
 ## 注意
 
 本项目不使用 `vars`，所有敏感配置均通过 `wrangler secret` 管理。
+
+## 安全建议
+
+### 1) 保护 Worker（Telegram Webhook 入口）
+- 启用 Telegram Webhook Secret：
+  - 配置 `TELEGRAM_SECRET_TOKEN`（wrangler secrets）
+  - 设置 Webhook：`./set_webhook <BOT_TOKEN> <URL> <SECRET_TOKEN>`
+  - Worker 校验请求头 `X-Telegram-Bot-Api-Secret-Token`
+- 仅允许 Telegram 源 IP（建议通过 Cloudflare Access 或 WAF）
+  - 允许网段：`149.154.160.0/20`、`91.108.4.0/22`
+  - Zero Trust > Access > Applications 新建应用，绑定 Worker 路由
+    - 策略 Action: ServiceAuth，Include: IP Ranges = 上述两个网段
+  - 说明：Telegram 不提供身份凭据，不要对该应用启用人类身份登录；使用 IP 白名单 + Secret Token 组合即可
+
+### 2) 保护 Gitea（Access Service Token）
+- 在 Zero Trust > Access > Applications 为 Gitea 域名创建“Service Token（ServiceAuth）”类型应用
+- 获取 `CF_ACCESS_CLIENT_ID` 与 `CF_ACCESS_CLIENT_SECRET`，通过 `wrangler secret` 配置
+- 代码会在请求 Gitea 时直传：
+  - `CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}`
+  - `CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}`
+
+### 3) GitHub Token 最小权限与有效期
+- 推荐使用“细粒度 PAT（Fine-grained PAT）”，设置过期时间，定期轮换
+- 最小权限建议：
+  - 若需镜像私有仓库：Repository 权限 -> Contents: Read、Metadata: Read
+  - 若启用组织校验（`GITHUB_AUTH_ORG`）：Organization 权限 -> Members: Read（或经典 Token 的 `read:org`）
+- 经典 PAT 备选（不推荐）：`repo`（读权限）+ `read:org`
