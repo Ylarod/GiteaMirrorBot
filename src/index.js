@@ -60,7 +60,16 @@ async function getSession(env, userKey) {
   if (!env.GITEA_MIRROR_BOT || !env.GITEA_MIRROR_BOT.get) {
     throw new Error("未绑定 KV GITEA_MIRROR_BOT，请在 wrangler.jsonc 配置并部署");
   }
-  const storedToken = await env.GITEA_MIRROR_BOT.get(key); // 仅保存纯 token 字符串
+  const storedRaw = await env.GITEA_MIRROR_BOT.get(key); // 可能为明文或加密串
+  const storedToken = storedRaw ? await decryptTokenIfNeeded(env, key, storedRaw) : "";
+  // 若为明文且已配置加密盐，则自动迁移为加密格式
+  const salt = env.AES_KEY_SALT || env["AES_KEY_SALT"];
+  if (storedRaw && !storedRaw.startsWith("enc:v1:") && salt && storedToken) {
+    try {
+      const enc = await encryptTokenIfPossible(env, key, storedToken);
+      if (enc && enc !== storedRaw) await env.GITEA_MIRROR_BOT.put(key, enc);
+    } catch (_) {}
+  }
   return {
     githubToken: storedToken || "",
     giteaBase: env.GITEA_BASE || "",
@@ -74,8 +83,72 @@ async function putSession(env, userKey, session) {
   if (!env.GITEA_MIRROR_BOT || !env.GITEA_MIRROR_BOT.put) {
     throw new Error("未绑定 KV GITEA_MIRROR_BOT，请在 wrangler.jsonc 配置并部署");
   }
-  // 仅保存 githubToken
-  await env.GITEA_MIRROR_BOT.put(key, session.githubToken || "");
+  // 仅保存 githubToken（AES 加密存储，缺失盐则回退明文）
+  const toStore = await encryptTokenIfPossible(env, key, session.githubToken || "");
+  await env.GITEA_MIRROR_BOT.put(key, toStore);
+}
+
+// ---- AES 加解密辅助（AES-GCM，key = SHA-256(AES_KEY_SALT + ':' + userId)）
+async function encryptTokenIfPossible(env, userId, token) {
+  const salt = env.AES_KEY_SALT || env["AES_KEY_SALT"];
+  if (!salt || !token) return token;
+  try {
+    const key = await deriveAesKey(salt, userId);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv },
+      key,
+      new TextEncoder().encode(token)
+    );
+    const joined = new Uint8Array(iv.byteLength + enc.byteLength);
+    joined.set(iv, 0);
+    joined.set(new Uint8Array(enc), iv.byteLength);
+    const b64 = bytesToBase64(joined);
+    return `enc:v1:${b64}`;
+  } catch (_) {
+    return token; // 失败回退明文
+  }
+}
+
+async function decryptTokenIfNeeded(env, userId, stored) {
+  if (!stored) return "";
+  if (!stored.startsWith("enc:v1:")) return stored; // 明文兼容
+  const salt = env.AES_KEY_SALT || env["AES_KEY_SALT"];
+  if (!salt) return ""; // 无盐无法解密，安全起见返回空
+  try {
+    const b64 = stored.slice("enc:v1:".length);
+    const bytes = base64ToBytes(b64);
+    const iv = bytes.slice(0, 12);
+    const cipher = bytes.slice(12);
+    const key = await deriveAesKey(salt, userId);
+    const dec = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
+    return new TextDecoder().decode(dec);
+  } catch (_) {
+    return ""; // 解密失败当作无 token
+  }
+}
+
+async function deriveAesKey(salt, userId) {
+  const material = new TextEncoder().encode(`${salt}:${userId}`);
+  const digest = await crypto.subtle.digest("SHA-256", material);
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(b64) {
+  const binary = atob(b64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 async function handleMirror(env, chatId, userId, text) {
@@ -308,12 +381,33 @@ async function handleLogin(env, chatId, userId, text, update) {
     try {
       const from = update && update.message && update.message.from;
       const who = from && (from.username ? `@${from.username}` : from.first_name || "用户");
-      const info = `🔔 登录通知\n用户ID: ${userId}${who ? `（${who}）` : ""}`;
+      let ghLine = "";
+      try {
+        const gh = await getGithubUser(token);
+        if (gh) {
+          const namePart = gh.name ? `（${gh.name}）` : "";
+          ghLine = `\nGitHub: ${gh.login}${namePart}`;
+        }
+      } catch (_) {}
+      const info = `🔔 登录通知\n${who ? `（${who}）` : ""}${ghLine}`;
       await sendMessage(env, ownerId, info);
     } catch (_) {
       // 忽略通知失败
     }
   }
+}
+
+async function getGithubUser(token) {
+  if (!token) return null;
+  const headers = {
+    "User-Agent": "cf-gitea-mirror-bot",
+    Accept: "application/vnd.github+json",
+    Authorization: `token ${token}`,
+  };
+  const resp = await fetch("https://api.github.com/user", { headers });
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  return { login: data.login, name: data.name, id: data.id };
 }
 
 async function handleLogout(env, chatId, userId) {

@@ -49,6 +49,8 @@ wrangler deploy
 - Cloudflare Access（直传服务令牌，不置换 JWT）：
   - `CF_ACCESS_CLIENT_ID`
   - `CF_ACCESS_CLIENT_SECRET`
+ - AES 加密（KV 中的 GitHub Token 加密存储）：
+   - `AES_KEY_SALT`（密钥盐，服务端密钥；与 userId 拼接后派生 AES-GCM 密钥）
 
 ### 设置 secrets（示例）
 
@@ -61,6 +63,7 @@ wrangler secret put OWNER_ID
 # 可选
 wrangler secret put GITHUB_AUTH_ORG
 wrangler secret put GITHUB_TOKEN
+wrangler secret put AES_KEY_SALT
 wrangler secret put TELEGRAM_SECRET_TOKEN
 ```
 
