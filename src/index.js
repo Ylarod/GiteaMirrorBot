@@ -165,16 +165,13 @@ async function ensureOrg(env, session, owner) {
 
   if (owner === giteaUsername) return; // 自己用户空间无需创建
   const resp = await fetch(`${giteaBase}/api/v1/orgs/${owner}`, {
-    headers: { Authorization: `token ${giteaToken}` },
+    headers: giteaHeaders(env, session),
   });
   if (resp.status === 200) return;
 
   const create = await fetch(`${giteaBase}/api/v1/orgs`, {
     method: "POST",
-    headers: {
-      Authorization: `token ${giteaToken}`,
-      "Content-Type": "application/json",
-    },
+    headers: giteaHeaders(env, session, true),
     body: JSON.stringify({ username: owner }),
   });
   if (!create.ok) {
@@ -203,10 +200,7 @@ async function migrateRepo(env, session, dstOwner, dstRepo, srcUrl, githubToken)
 
   const resp = await fetch(`${giteaBase}/api/v1/repos/migrate`, {
     method: "POST",
-    headers: {
-      Authorization: `token ${giteaToken}`,
-      "Content-Type": "application/json",
-    },
+    headers: giteaHeaders(env, session, true),
     body: JSON.stringify(body),
   });
 
@@ -219,6 +213,19 @@ async function migrateRepo(env, session, dstOwner, dstRepo, srcUrl, githubToken)
     const txt = await resp.text();
     throw new Error(`迁移失败: ${resp.status} ${txt}`);
   }
+}
+
+function giteaHeaders(env, session, withJson) {
+  const token = (session && session.giteaToken) || env.GITEA_TOKEN;
+  const headers = { Authorization: `token ${token}` };
+  if (withJson) headers["Content-Type"] = "application/json";
+  const cfId = env.CF_ACCESS_CLIENT_ID || env["CF-ACCESS-CLIENT-ID"];
+  const cfSecret = env.CF_ACCESS_CLIENT_SECRET || env["CF-ACCESS-CLIENT-SECRET"];
+  if (cfId && cfSecret) {
+    headers["CF-Access-Client-Id"] = cfId;
+    headers["CF-Access-Client-Secret"] = cfSecret;
+  }
+  return headers;
 }
 
 async function listGithubRepos(env, session, user) {
