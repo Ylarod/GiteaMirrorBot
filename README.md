@@ -63,7 +63,7 @@ wrangler secret put OWNER_ID
 # 可选
 wrangler secret put GITHUB_AUTH_ORG
 wrangler secret put GITHUB_TOKEN
-wrangler secret put AES_KEY_SALT
+openssl rand -base64 48 | wrangler secret put AES_KEY_SALT
 wrangler secret put TELEGRAM_SECRET_TOKEN
 ```
 
