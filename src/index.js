@@ -27,6 +27,8 @@ export default {
         await handleMirror(env, chatId, userId, text);
       } else if (text.startsWith("/getid")) {
         await handleGetId(env, chatId, userId, update);
+      } else if (text.startsWith("/status")) {
+        await handleStatus(env, chatId, userId);
       } else if (text.startsWith("/login")) {
         await handleLogin(env, chatId, userId, text, update);
       } else if (text.startsWith("/logout")) {
@@ -42,6 +44,7 @@ export default {
             "/mirror <Git URL> <目标org/repo>",
             "/mirror <GitHub URL> [目标org/repo]",
             "/getid",
+            "/status",
           ].join("\n")
         );
       }
@@ -427,6 +430,36 @@ async function handleGetId(env, chatId, userId, update) {
     `当前 chatId：${chatId}（类型：${chatType || "unknown"}）`,
   ];
   if (username) lines.unshift(`你好，${username}`);
+  await sendMessage(env, chatId, lines.join("\n"));
+}
+
+async function handleStatus(env, chatId, userId) {
+  const teleSecretSet = !!(env.TELEGRAM_SECRET_TOKEN);
+  const cfAccessSet = !!(env.CF_ACCESS_CLIENT_ID);
+  const aesSaltSet = !!(env.AES_KEY_SALT);
+  const orgLimitSet = !!(env.GITHUB_AUTH_ORG);
+
+  const session = await getSession(env, userId);
+  const hasLogin = !!session.githubToken;
+
+  const lines = [
+    "安全性状态:",
+    `- TELEGRAM_SECRET_TOKEN: ${teleSecretSet ? "已设置" : "未设置"}`,
+    `- CF_ACCESS_CLIENT_ID: ${cfAccessSet ? "已设置" : "未设置"}`,
+    `- AES_KEY_SALT: ${aesSaltSet ? "已设置" : "未设置"}`,
+    `- GITHUB_AUTH_ORG: ${orgLimitSet ? "已设置" : "未设置"}`,
+  ];
+
+  if (hasLogin) {
+    try {
+      const gh = await getGithubUser(session.githubToken);
+      if (gh) {
+        const display = gh.name || gh.login;
+        lines.push(`Hello, ${display}`);
+      }
+    } catch (_) {}
+  }
+
   await sendMessage(env, chatId, lines.join("\n"));
 }
 
