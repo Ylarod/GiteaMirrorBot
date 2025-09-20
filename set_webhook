@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 用法:
-  ./set_webhook <BOT_TOKEN> [WEBHOOK_URL]
+  ./set_webhook <BOT_TOKEN> [WEBHOOK_URL] [SECRET_TOKEN]
 
 说明:
   - 当未提供 WEBHOOK_URL 时，将读取环境变量 WEBHOOK_URL。
@@ -24,6 +24,7 @@ fi
 
 BOT_TOKEN="$1"
 WEBHOOK_URL="${2-}"
+SECRET_TOKEN="${3-}"
 
 if [[ -z "$WEBHOOK_URL" ]]; then
   WEBHOOK_URL="${WEBHOOK_URL:-}"
@@ -34,10 +35,23 @@ if [[ -z "$WEBHOOK_URL" ]]; then
   exit 2
 fi
 
+if [[ -z "$SECRET_TOKEN" ]]; then
+  SECRET_TOKEN="${SECRET_TOKEN:-${TELEGRAM_SECRET_TOKEN:-}}"
+fi
+
 echo "设置 Telegram Webhook 到: $WEBHOOK_URL"
-curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "url=${WEBHOOK_URL}" | tee /dev/stderr
+if [[ -n "$SECRET_TOKEN" ]]; then
+  curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "url=${WEBHOOK_URL}" \
+    -d "secret_token=${SECRET_TOKEN}" \
+    -d 'allowed_updates=["message"]' | tee /dev/stderr
+else
+  curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+    -H "Content-Type: application/x-www-form-urlencoded" \
+    -d "url=${WEBHOOK_URL}" \
+    -d 'allowed_updates=["message"]' | tee /dev/stderr
+fi
 
 echo
 echo "当前 Webhook 信息:"

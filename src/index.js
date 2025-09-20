@@ -4,6 +4,15 @@ export default {
       return new Response("Telegram Webhook OK", { status: 200 });
     }
 
+    // 校验 Telegram Secret Token（若已配置）
+    const expectedSecret = env.TELEGRAM_SECRET_TOKEN;
+    if (expectedSecret) {
+      const got = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+      if (!got || got !== expectedSecret) {
+        return new Response("unauthorized", { status: 401 });
+      }
+    }
+
     const update = await request.json();
     if (!update.message || !update.message.text) {
       return new Response("no message", { status: 200 });

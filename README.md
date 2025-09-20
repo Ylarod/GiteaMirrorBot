@@ -61,6 +61,7 @@ wrangler secret put OWNER_ID
 # 可选
 wrangler secret put GITHUB_AUTH_ORG
 wrangler secret put GITHUB_TOKEN
+wrangler secret put TELEGRAM_SECRET_TOKEN
 ```
 
 ## Telegram Webhook 配置
@@ -69,7 +70,7 @@ wrangler secret put GITHUB_TOKEN
 
 - 用法
 ```
-./set_webhook <BOT_TOKEN> [WEBHOOK_URL]
+./set_webhook <BOT_TOKEN> [WEBHOOK_URL] [SECRET_TOKEN]
 ```
 
 - 示例
@@ -79,13 +80,14 @@ wrangler secret put GITHUB_TOKEN
 
 # 方式二：用环境变量传 URL
 chmod +x ./set_webhook
-WEBHOOK_URL=https://<你的-worker-域名> ./set_webhook <你的BOT_TOKEN>
+WEBHOOK_URL=https://<你的-worker-域名> TELEGRAM_SECRET_TOKEN=<你的SECRET> ./set_webhook <你的BOT_TOKEN>
 
 # 取消 Webhook（置空 URL）
 ./set_webhook <你的BOT_TOKEN> ""
 ```
 
-脚本会在设置后自动调用 getWebhookInfo 回显当前状态。
+脚本会在设置后自动调用 getWebhookInfo 回显当前状态。若设置了 SECRET_TOKEN，则 Telegram 会在回调请求头 `X-Telegram-Bot-Api-Secret-Token` 中附带该值，Worker 将与 `TELEGRAM_SECRET_TOKEN` 对比校验，失败返回 401。
+脚本默认将 `allowed_updates` 设置为 `["message"]` 以限制仅接收消息更新。
 
 ## 使用示例
 
