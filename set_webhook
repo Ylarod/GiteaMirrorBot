@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+用法:
+  ./set_webhook <BOT_TOKEN> [WEBHOOK_URL]
+
+说明:
+  - 当未提供 WEBHOOK_URL 时，将读取环境变量 WEBHOOK_URL。
+  - 成功后会显示 setWebhook 返回值与当前 Webhook 信息。
+USAGE
+}
+
+if [[ "${1-}" == "-h" || "${1-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 1
+fi
+
+BOT_TOKEN="$1"
+WEBHOOK_URL="${2-}"
+
+if [[ -z "$WEBHOOK_URL" ]]; then
+  WEBHOOK_URL="${WEBHOOK_URL:-}"
+fi
+
+if [[ -z "$WEBHOOK_URL" ]]; then
+  echo "错误: 未提供 WEBHOOK_URL。请作为第二参数传入，或设置环境变量 WEBHOOK_URL。" >&2
+  exit 2
+fi
+
+echo "设置 Telegram Webhook 到: $WEBHOOK_URL"
+curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "url=${WEBHOOK_URL}" | tee /dev/stderr
+
+echo
+echo "当前 Webhook 信息:"
+curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo" | tee /dev/stderr
+echo

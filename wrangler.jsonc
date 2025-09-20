@@ -9,7 +9,13 @@
 	"compatibility_date": "2025-09-19",
 	"observability": {
 		"enabled": true
-	}
+	},
+	"kv_namespaces": [
+		{
+			"binding": "GITEA_MIRROR_BOT",
+			"id": "c58b1f9ba3674f2691bfc6f67fdc7f20"
+		}
+	]
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
