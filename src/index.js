@@ -197,8 +197,8 @@ async function handleMirror(env, chatId, userId, text) {
 
     await sendMessage(env, chatId, `开始镜像：${srcOwner}/${srcRepo} → ${dstOwner}/${dstRepo}`);
     await ensureOrg(env, session, dstOwner);
-    await migrateRepo(env, session, dstOwner, dstRepo, `https://github.com/${srcOwner}/${srcRepo}.git`, effectiveGithubToken);
-    await sendMessage(env, chatId, `✅ 镜像完成：${dstOwner}/${dstRepo}`);
+    const result = await migrateRepo(env, session, dstOwner, dstRepo, `https://github.com/${srcOwner}/${srcRepo}.git`, effectiveGithubToken);
+    await sendMessage(env, chatId, mirrorResultText(result, dstOwner, dstRepo));
   } else if (ghUserMatch) {
     const user = ghUserMatch[1];
     const dstOwner = dst || user;
@@ -237,9 +237,14 @@ async function handleMirror(env, chatId, userId, text) {
 
     await sendMessage(env, chatId, `开始镜像：${src} → ${dstOwner}/${dstRepo}`);
     await ensureOrg(env, session, dstOwner);
-    await migrateRepo(env, session, dstOwner, dstRepo, src, effectiveGithubToken);
-    await sendMessage(env, chatId, `✅ 镜像完成：${dstOwner}/${dstRepo}`);
+    const result = await migrateRepo(env, session, dstOwner, dstRepo, src, effectiveGithubToken);
+    await sendMessage(env, chatId, mirrorResultText(result, dstOwner, dstRepo));
   }
+}
+
+function mirrorResultText(result, dstOwner, dstRepo) {
+  if (result === "exists") return `ℹ️ 仓库已存在，未重新镜像：${dstOwner}/${dstRepo}`;
+  return `✅ 镜像完成：${dstOwner}/${dstRepo}`;
 }
 
 async function ensureOrg(env, session, owner) {
@@ -249,19 +254,40 @@ async function ensureOrg(env, session, owner) {
   if (!giteaBase || !giteaToken) throw new Error("缺少 Gitea 配置，请设置 GITEA_BASE/GITEA_TOKEN 或联系管理员");
 
   if (owner === giteaUsername) return; // 自己用户空间无需创建
-  const resp = await fetch(`${giteaBase}/api/v1/orgs/${owner}`, {
+  const resp = await giteaFetch(`${giteaBase}/api/v1/orgs/${owner}`, {
     headers: giteaHeaders(env, session),
   });
   if (resp.status === 200) return;
 
-  const create = await fetch(`${giteaBase}/api/v1/orgs`, {
+  const create = await giteaFetch(`${giteaBase}/api/v1/orgs`, {
     method: "POST",
     headers: giteaHeaders(env, session, true),
     body: JSON.stringify({ username: owner }),
   });
   if (!create.ok) {
-    throw new Error(`创建组织失败: ${create.status}`);
+    const txt = await create.text();
+    throw new Error(`创建组织失败: ${create.status} ${txt.slice(0, 200)}`);
   }
+}
+
+// 调用 Gitea API：禁止自动跟随重定向，并校验返回的是 JSON
+// 否则 Cloudflare Access 拦截时会 302 到登录页，跟随后得到 200 HTML 被误判为成功
+async function giteaFetch(url, init) {
+  const resp = await fetch(url, { ...init, redirect: "manual" });
+  const method = (init && init.method) || "GET";
+  console.log(`gitea ${method} ${new URL(url).pathname} -> ${resp.status}`);
+  if (resp.status >= 300 && resp.status < 400) {
+    const location = resp.headers.get("Location") || "";
+    if (location.includes("cloudflareaccess.com")) {
+      throw new Error("Gitea 被 Cloudflare Access 拦截，请检查 CF_ACCESS_CLIENT_ID/CF_ACCESS_CLIENT_SECRET 是否有效");
+    }
+    throw new Error(`Gitea 返回重定向 ${resp.status} → ${location}`);
+  }
+  const contentType = resp.headers.get("Content-Type") || "";
+  if (resp.ok && resp.status !== 204 && !contentType.includes("application/json")) {
+    throw new Error(`Gitea 返回非 JSON 响应（${resp.status} ${contentType}），请检查 GITEA_BASE 与 Access 配置`);
+  }
+  return resp;
 }
 
 async function migrateRepo(env, session, dstOwner, dstRepo, srcUrl, githubToken) {
@@ -283,21 +309,23 @@ async function migrateRepo(env, session, dstOwner, dstRepo, srcUrl, githubToken)
     body.service = "github"; // 让 Gitea 以 GitHub 方式迁移
   }
 
-  const resp = await fetch(`${giteaBase}/api/v1/repos/migrate`, {
+  const resp = await giteaFetch(`${giteaBase}/api/v1/repos/migrate`, {
     method: "POST",
     headers: giteaHeaders(env, session, true),
     body: JSON.stringify(body),
   });
 
-  if (resp.status === 409 || resp.status === 422) {
+  if (resp.status === 409) {
     // 仓库已存在
-    return;
+    return "exists";
   }
 
   if (!resp.ok) {
+    // 422 为参数校验失败，不能当作已存在吞掉
     const txt = await resp.text();
     throw new Error(`迁移失败: ${resp.status} ${txt}`);
   }
+  return "created";
 }
 
 function giteaHeaders(env, session, withJson) {
